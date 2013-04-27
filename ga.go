@@ -13,7 +13,7 @@ import (
 
 const (
     kGENERATION_SIZE = 1000
-    kMUTATION_RATE = .6
+    kMUTATION_RATE = .5
 )
 
 var target = []byte("Hello World")
@@ -69,13 +69,23 @@ func main() {
 
 func initial() (gen []*Genome) {
     gen = make([]*Genome, kGENERATION_SIZE)
+    data := make(chan *Genome, kGENERATION_SIZE)
+    for _ = range gen {
+        go func() {
+            tmp := &Genome{}
+            tmp.genes = make([]byte, kCH_LEN)
+            for j := range tmp.genes {
+                tmp.genes[j] = byte(random(32, 126))
+            }
+            tmp.score = score(tmp.genes)
+
+            data <- tmp
+        }()
+    }
+
     for i := range gen {
-        gen[i] = &Genome{}
-        gen[i].genes = make([]byte, kCH_LEN)
-        for j := range gen[i].genes {
-            gen[i].genes[j] = byte(random(32, 126))
-        }
-        gen[i].score = score(gen[i].genes)
+        tmp := <-data
+        gen[i] = tmp
     }
 
     return gen
@@ -137,21 +147,26 @@ func breed(p1 *Genome, p2 *Genome) (child *Genome, err error) {
     return child, nil
 }
 
-func splice(p1 *Genome, p2 *Genome) (child *Genome, err error) {
+func splice(p1 *Genome, p2 *Genome) (child *Genome, child2 * Genome, err error) {
     n := rand.Intn(len(p1.genes))
 
     child = &Genome{}
     child.genes = make([]byte, len(p1.genes))
 
+    child2 = &Genome{}
+    child2.genes = make([]byte, len(p1.genes))
+
     for i := range child.genes {
         if i <= n {
             child.genes[i] = p1.genes[i]
+            child2.genes[i] = p2.genes[i]
         } else {
             child.genes[i] = p2.genes[i]
+            child2.genes[i] = p1.genes[i]
         }
     }
 
-    return child, nil
+    return child, child2, nil
 }
 
 func newgen(parent []*Genome) (child []*Genome) {
@@ -165,33 +180,47 @@ func newgen(parent []*Genome) (child []*Genome) {
     best := parent[0:tpc]
 
     child = make([]*Genome, kGENERATION_SIZE)
-    for i := 0; i < kGENERATION_SIZE; i++ {
-        // Pick two parents from the best
-        p1 := rand.Intn(tpc)
+    data := make(chan *Genome, kGENERATION_SIZE)
+    for i := 0; i < kGENERATION_SIZE/2; i++ {
+        go func() {
+            // Pick two parents from the best
+            p1 := rand.Intn(tpc)
 
-        // Make sure we don't breed with the same parent
-        p2 := p1
-        for p2 != p1 {
-            p2 = rand.Intn(tpc)
-        }
+            // Make sure we don't breed with the same parent
+            p2 := p1
+            for p2 != p1 {
+                p2 = rand.Intn(tpc)
+            }
 
-        // Breed the parents
-        tmp, err := splice(best[p1], best[p2])
-        if err != nil {
-            log.Fatal(err)
-        }
-
-        // Mutate the child
-        if randomf(0, 1) < kMUTATION_RATE {
-            mutate(tmp)
+            // Breed the parents
+            tmp1, tmp2, err := splice(best[p1], best[p2])
             if err != nil {
                 log.Fatal(err)
             }
-        }
 
-        // Score the final child genome
+            // Mutate the child
+            if randomf(0, 1) < kMUTATION_RATE {
+                mutate(tmp1)
+            }
+
+            if randomf(0, 1) < kMUTATION_RATE {
+                mutate(tmp2)
+            }
+
+
+            // Score the final child genome
+            tmp1.score = score(tmp1.genes)
+            tmp2.score = score(tmp2.genes)
+
+            data <- tmp1
+            data <- tmp2
+        }()
+    }
+
+    // Collect all the data
+    for i := 0; i < kGENERATION_SIZE; i++ {
+        tmp := <- data
         child[i] = tmp
-        child[i].score = score(child[i].genes)
     }
 
     // Keep the best parents in case of shitty offspring
