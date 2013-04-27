@@ -13,7 +13,7 @@ import (
 
 const (
     kGENERATION_SIZE = 1000
-    kMUTATION_RATE = .75
+    kMUTATION_RATE = .6
 )
 
 var target = []byte("Hello World")
@@ -40,10 +40,8 @@ func main() {
     //    base[i] = byte(rand.Intn(128)) 
     //}
 
+    t := time.Now()
     gen := initial()
-    for i := range gen {
-        fmt.Printf("Inital %v: %v\n", gen[i].score, string(gen[i].genes))
-    }
 
     newgen(gen)
 
@@ -51,14 +49,9 @@ func main() {
     best := gen[0]
     gc := 0
     for best.score > 0 {
-        fmt.Printf("Running generation %v\n", gc)
         tmp := newgen(child)
 
         child = tmp
-
-        for i := range child {
-            fmt.Printf("Generation %v, %v: %v (%v)\n", gc, i, string(child[i].genes), child[i].score)
-        }
 
         // Find the best individual
         sort.Sort(ByScore{child})
@@ -68,7 +61,10 @@ func main() {
         //time.Sleep(time.Second*2)
     }
 
-    fmt.Printf("Found solution in %v generations with score %v: %v", gc, best.score, string(best.genes)) 
+    dur := time.Since(t)
+
+    fmt.Printf("Solution found in %v\n", dur)
+    fmt.Printf("Found solution in %v generations with score %v: %v\n", gc, best.score, string(best.genes)) 
 }
 
 func initial() (gen []*Genome) {
@@ -166,7 +162,6 @@ func newgen(parent []*Genome) (child []*Genome) {
     sort.Sort(ByScore{parent})
 
     tpc := int(float32(len(parent)) * .01)
-    fmt.Printf("TPC: %v", tpc)
     best := parent[0:tpc]
 
     child = make([]*Genome, kGENERATION_SIZE)
