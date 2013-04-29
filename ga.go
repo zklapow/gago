@@ -9,39 +9,57 @@ import (
     "errors"
     "gago/util"
     "log"
+    "flag"
 )
 
 const (
     kGENERATION_SIZE = 1000
-    kMUTATION_RATE = .5
+    kSELECT_SIZE = 100
+    kMUTATION_RATE = 5
 )
 
-var target = []byte("Hello World")
-var kCH_LEN = len(target)
+var kCH_LEN int 
 
 type Genome struct {
     genes []byte
     score int
 }
-type Genomes []*Genome
 
+func (g *Genome) GeneString() (s string) {return string(g.genes)}
+
+type Genomes []*Genome
 func (s Genomes) Len() int {return len(s)}
 func (s Genomes) Swap(i, j int) {s[i], s[j] = s[j], s[i]}
 
 type ByScore struct { Genomes }
-
 func (s ByScore) Less(i, j int) bool {return s.Genomes[i].score < s.Genomes[j].score}
 
-func main() {
-    cur := time.Now()
-    rand.Seed(cur.Unix())
+// Flags
+var verbose = flag.Bool("v", false, "Turn on verbose output.")
+var target = flag.String("target", "Hello World!", "The target string to search for")
 
-    //for i := 0; i < 20; i++ {
-    //    base[i] = byte(rand.Intn(128)) 
-    //}
+var tb []byte
+
+func main() {
+    // Get flage vals
+    flag.Parse()
+
+    tb = []byte(*target)
+    kCH_LEN = len(tb)
+
+    rand.Seed(util.RandSeed())
+
+    fmt.Printf("Searching for %v\n", string(tb))
 
     t := time.Now()
     gen := initial()
+
+    if *verbose {
+        // Log the entire intial generation
+        for i, val := range gen {
+            fmt.Printf("Inital %v: %v (%v)\n", i, val.GeneString(), val.score)
+        }
+    }
 
     newgen(gen)
 
@@ -49,6 +67,9 @@ func main() {
     best := gen[0]
     gc := 0
     for best.score > 0 {
+        if *verbose {
+            fmt.Printf("Running generation %v\n", gc)
+        }
         tmp := newgen(child)
 
         child = tmp
@@ -58,7 +79,9 @@ func main() {
         best = child[0]
         gc++
 
-        //time.Sleep(time.Second*2)
+        if *verbose {
+            fmt.Printf("Current best is: %v\n", best.GeneString())
+        }
     }
 
     dur := time.Since(t)
@@ -72,10 +95,13 @@ func initial() (gen []*Genome) {
     data := make(chan *Genome, kGENERATION_SIZE)
     for _ = range gen {
         go func() {
+            //rand.Seed(util.RandSeed())
+
             tmp := &Genome{}
             tmp.genes = make([]byte, kCH_LEN)
             for j := range tmp.genes {
-                tmp.genes[j] = byte(random(32, 126))
+                //rand.Seed(util.RandSeed())
+                tmp.genes[j] = byte(util.Random(32, 126))
             }
             tmp.score = score(tmp.genes)
 
@@ -91,21 +117,13 @@ func initial() (gen []*Genome) {
     return gen
 }
 
-func random(min, max int) int {
-    return rand.Intn(max - min) + min
-}
-
-func randomf(min, max float32) float32 {
-    return (rand.Float32() * (max-min)) + min
-}
-
 func score(ind []byte) (dist int) {
     //fmt.Printf("Target: %v Val: %v", len(target), len(ind))
     dist = 0
     for i, val := range ind {
-        if i < len(target) && i < len(ind) {
-            if val != target[i] {
-                dist = dist + int(math.Abs(float64(int(val) - int(target[i]))))
+        if i < len(tb) && i < len(ind) {
+            if val != tb[i] {
+                dist = dist + int(math.Abs(float64(int(val) - int(tb[i]))))
             }
         } else if val != byte(' ') {
             dist ++
@@ -118,7 +136,7 @@ func score(ind []byte) (dist int) {
 func mutate(ind *Genome) {
     index := rand.Intn(len(ind.genes))
 
-    ind.genes[index] = byte(random(32, 126))
+    ind.genes[index] = byte(util.Random(32, 126))
 }
 
 func breed(p1 *Genome, p2 *Genome) (child *Genome, err error) {
@@ -127,7 +145,7 @@ func breed(p1 *Genome, p2 *Genome) (child *Genome, err error) {
     }
 
     // Change a random number of genes and pick random alleles to change
-    n := int(randomf(0, 1) * float32(len(p1.genes)))
+    n := int(util.Randomf(0, 1) * float32(len(p1.genes)))
     change := rand.Perm(len(p1.genes))[:n] 
 
     // Initialize a new child
@@ -148,6 +166,10 @@ func breed(p1 *Genome, p2 *Genome) (child *Genome, err error) {
 }
 
 func splice(p1 *Genome, p2 *Genome) (child *Genome, child2 * Genome, err error) {
+    if len(p1.genes) != len(p2.genes) {
+        return nil, nil, errors.New("Cannot breed parents with different chromosome lengths!")
+    }
+
     n := rand.Intn(len(p1.genes))
 
     child = &Genome{}
@@ -169,27 +191,51 @@ func splice(p1 *Genome, p2 *Genome) (child *Genome, child2 * Genome, err error) 
     return child, child2, nil
 }
 
+func tourney(parent Genomes) (res *Genome) {
+    a, b := rand.Intn(len(parent)), rand.Intn(len(parent))
+
+    if parent[a].score > parent[b].score {
+        return parent[a]
+    } else {
+        return parent[b]
+    }
+
+    return nil
+}
+
 func newgen(parent []*Genome) (child []*Genome) {
     // Reseed random
-    cur := time.Now()
-    rand.Seed(cur.Unix())
+    //rand.Seed(util.RandSeed())
 
     sort.Sort(ByScore{parent})
 
     tpc := int(float32(len(parent)) * .01)
     best := parent[0:tpc]
 
+    if *verbose {
+        for i, val := range best {
+            fmt.Printf("Best Candidate %v is: %v\n", i, val.GeneString())
+        }
+    }
+
+    for len(best) < kSELECT_SIZE {
+        best = append(best, tourney(parent))
+    }
+
     child = make([]*Genome, kGENERATION_SIZE)
     data := make(chan *Genome, kGENERATION_SIZE)
     for i := 0; i < kGENERATION_SIZE/2; i++ {
         go func() {
+            //rand.Seed(util.RandSeed())
+
             // Pick two parents from the best
-            p1 := rand.Intn(tpc)
+            p1 := rand.Intn(kSELECT_SIZE)
 
             // Make sure we don't breed with the same parent
             p2 := p1
             for p2 != p1 {
-                p2 = rand.Intn(tpc)
+                //rand.Seed(util.RandSeed())
+                p2 = rand.Intn(kSELECT_SIZE)
             }
 
             // Breed the parents
@@ -197,16 +243,6 @@ func newgen(parent []*Genome) (child []*Genome) {
             if err != nil {
                 log.Fatal(err)
             }
-
-            // Mutate the child
-            if randomf(0, 1) < kMUTATION_RATE {
-                mutate(tmp1)
-            }
-
-            if randomf(0, 1) < kMUTATION_RATE {
-                mutate(tmp2)
-            }
-
 
             // Score the final child genome
             tmp1.score = score(tmp1.genes)
@@ -220,6 +256,13 @@ func newgen(parent []*Genome) (child []*Genome) {
     // Collect all the data
     for i := 0; i < kGENERATION_SIZE; i++ {
         tmp := <- data
+
+        if (i % kMUTATION_RATE) == 0 {
+            mutate(tmp)
+
+            // rescore
+            tmp.score = score(tmp.genes)
+        }
         child[i] = tmp
     }
 
